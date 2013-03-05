@@ -1,0 +1,99 @@
+<?php
+
+/**
+ * ProcessWire Page References Tab
+ *
+ * A little addon to display pages referencing the page being currently edited.
+ *
+ * @copyright Copyright (c) 2013, Niklas Lakanen
+ *
+ */
+
+class PageReferencesTab extends WireData implements Module {
+
+	/**
+	 * Return information about this module (required)
+	 *
+	 * @return array
+	 *
+	 */
+	static public function getModuleInfo() {
+		return array(
+			'title'    => 'Page References Tab',
+			'summary'  => 'Adds a tab with a list of pages referencing the current page to the page edit view.',
+			'version'  => 005,
+			'author'   => 'Niklas Lakanen',
+			'autoload' => true
+		);
+	}
+
+	/**
+	 * Add the hook when API is ready
+	 *
+	 */
+	public function init() {
+		$this->addHookAfter('ProcessPageEdit::buildForm', $this, 'hookBuildForm');
+	}
+
+	/**
+	 * Add References tab to page edit form
+	 *
+	 */
+	public function hookBuildForm(HookEvent $event) {
+		// get the InputFieldForm object from the event (return value of buildForm())
+		$form = $event->return;
+
+		// create the tab
+		$refTab = new InputfieldWrapper();
+		$refTab->attr('id', $this->className() . 'References');
+		$refTab->attr('title', $this->_('References'));
+
+		// construct contents inside a container
+		$field = $this->modules->get("InputfieldMarkup");
+		$field->label = $this->_("Pages referencing this page via a Page field");
+		$field->value = '';
+
+		// construct a table with title, path, field and action links
+		$table = $this->modules->get("MarkupAdminDataTable");
+		$table->headerRow(array(
+			$this->_('Page title'),
+			$this->_('Page path'),
+			$this->_('Field'),
+			$this->_('Actions')
+			));
+		$table->setEncodeEntities(false);
+		$table->rowCount = 0;
+
+		// iterate over fields
+		// handle each field separately to be able to tell which field matched (instead of f1|f2|f2=$page)
+		foreach(wire('fields') as $refField) {
+			// we're done if the field is of wrong type
+			if($refField->type != 'FieldtypePage') continue;
+			// we're done if the field is a system field
+			if($refField->flags & Field::flagSystem) continue;
+
+			// wire('page') would be the page with ProcessPageEdit
+			// GET parameter id tells the page that's being edited
+			$refs = wire('pages')->find("$refField=" . (int)$this->input->get('id'));
+
+			foreach($refs as $refPage) {
+				$actions = array();
+				// show only appropriate actions
+				if($refPage->viewable()) array_push($actions, '<a href="' . $refPage->url . '">view</a>');
+				if($refPage->editable()) array_push($actions, '<a href="' . $this->config->urls->admin . 'page/edit/?id=' . $refPage->id . '">edit</a>');
+				$table->row(array($refPage->title, $refPage->path, $refField, implode(' | ', $actions)));
+				$table->rowCount++;
+			}
+		}
+
+		if($table->rowCount) {
+			$field->value = $table->render();
+		} else {
+			$field->value = $this->_('Other pages are not referencing this page.');
+		}
+
+		// append the markup to the tab and the tab to the form
+		$refTab->append($field);
+		$form->append($refTab);
+	}
+}
