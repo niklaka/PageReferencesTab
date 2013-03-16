@@ -9,7 +9,13 @@
  *
  */
 
-class PageReferencesTab extends WireData implements Module {
+class PageReferencesTab extends WireData implements Module, ConfigurableModule {
+
+	/**
+	 * @var Page Page being edited
+	 *
+	 */
+	private $editedPage;
 
 	/**
 	 * Return information about this module (required)
@@ -21,18 +27,50 @@ class PageReferencesTab extends WireData implements Module {
 		return array(
 			'title'    => 'Page References Tab',
 			'summary'  => 'Adds a tab with a list of pages referencing the current page to the page edit view.',
-			'version'  => 005,
+			'version'  => 10,
 			'author'   => 'Niklas Lakanen',
 			'autoload' => true
 		);
 	}
 
 	/**
-	 * Add the hook when API is ready
+	 * __construct() is the right place to init config vars before they'll get populated
+	 *
+	 */
+	public function __construct() {
+		$this->enabledTemplates = array();
+	}
+
+	/**
+	 * init() is called when PW's API is ready
 	 *
 	 */
 	public function init() {
-		$this->addHookAfter('ProcessPageEdit::buildForm', $this, 'hookBuildForm');
+	}
+
+	/**
+	 * ready() is called when both PW's API is ready and $page object is initialized (for autoload modules!)
+	 * Add the hook here to be able to skip it based on the template of the edited page.
+	 *
+	 */
+	public function ready() {
+		// we're interested in page editor only
+		if(wire('page')->process != 'ProcessPageEdit') return;
+
+		// wire('page') would be the page with ProcessPageEdit
+		// GET parameter id tells the page that's being edited
+		$this->editedPage = wire('pages')->get((int)$this->input->get('id'));
+
+		// don't even consider system templates
+		if($this->editedPage->template->flags & Template::flagSystem) return;
+
+		// hook only if
+		// 1) no templates have been chosen (=all enabled) OR
+		// 2) the template of the edited page has been chosen
+		if(count($this->enabledTemplates) == 0 or
+		   in_array($this->editedPage->template->name, $this->enabledTemplates)) {
+			$this->addHookAfter('ProcessPageEdit::buildForm', $this, 'hookBuildForm');
+		}
 	}
 
 	/**
@@ -51,7 +89,6 @@ class PageReferencesTab extends WireData implements Module {
 		// construct contents inside a container
 		$field = $this->modules->get("InputfieldMarkup");
 		$field->label = $this->_("Pages referencing this page via a Page field");
-		$field->value = '';
 
 		// construct a table with title, path, field and action links
 		$table = $this->modules->get("MarkupAdminDataTable");
@@ -72,9 +109,8 @@ class PageReferencesTab extends WireData implements Module {
 			// we're done if the field is a system field
 			if($refField->flags & Field::flagSystem) continue;
 
-			// wire('page') would be the page with ProcessPageEdit
-			// GET parameter id tells the page that's being edited
-			$refs = wire('pages')->find("$refField=" . (int)$this->input->get('id'));
+			// find references
+			$refs = wire('pages')->find("$refField=" . $this->editedPage->id);
 
 			foreach($refs as $refPage) {
 				$actions = array();
@@ -95,5 +131,34 @@ class PageReferencesTab extends WireData implements Module {
 		// append the markup to the tab and the tab to the form
 		$refTab->append($field);
 		$form->append($refTab);
+	}
+
+	/**
+	 * Return an InputfieldsWrapper of Inputfields used to configure the class
+	 *
+	 * @param array $data Array of config values indexed by field name
+	 * @return InputfieldsWrapper
+	 *
+	 */
+	public static function getModuleConfigInputfields(array $data) {
+		$wrapper = new InputFieldWrapper();
+
+		$fieldEnabledTemplates = wire('modules')->get('InputfieldAsmSelect');
+		$fieldEnabledTemplates->attr('name+id', 'enabledTemplates');
+		$fieldEnabledTemplates->label = __('Enabled templates', __FILE__);
+		$fieldEnabledTemplates->description = __('"References" tab will only be shown for chosen templates. If no template is chosen, "References" tab will be shown for all templates.', __FILE__);
+		$fieldEnabledTemplates->attr('title', __('Enable template', __FILE__));
+		$fieldEnabledTemplates->setAsmSelectOption('sortable', false);
+
+		// populate with all available templates
+		foreach(wire('templates') as $t) {
+			// filter out system templates
+			if(!($t->flags & Template::flagSystem)) $fieldEnabledTemplates->addOption($t->name);
+		}
+		if(isset($data['enabledTemplates'])) $fieldEnabledTemplates->value = $data['enabledTemplates'];
+
+		$wrapper->add($fieldEnabledTemplates);
+
+		return $wrapper;
 	}
 }
