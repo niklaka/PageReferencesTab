@@ -27,7 +27,7 @@ class PageReferencesTab extends WireData implements Module, ConfigurableModule {
 		return array(
 			'title'    => 'Page References Tab',
 			'summary'  => 'Adds a tab with a list of pages referencing the current page to the page edit view.',
-			'version'  => 10,
+			'version'  => 20,
 			'author'   => 'Niklas Lakanen',
 			'autoload' => true
 		);
@@ -57,9 +57,13 @@ class PageReferencesTab extends WireData implements Module, ConfigurableModule {
 		// we're interested in page editor only
 		if(wire('page')->process != 'ProcessPageEdit') return;
 
+		// skip changing templates (only target the actual edit form)
+		$id = (int)$this->input->get('id');
+		if(!$id) return;
+
 		// wire('page') would be the page with ProcessPageEdit
 		// GET parameter id tells the page that's being edited
-		$this->editedPage = wire('pages')->get((int)$this->input->get('id'));
+		$this->editedPage = wire('pages')->get($id);
 
 		// don't even consider system templates
 		if($this->editedPage->template->flags & Template::flagSystem) return;
