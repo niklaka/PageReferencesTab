@@ -27,7 +27,7 @@ class PageReferencesTab extends WireData implements Module, ConfigurableModule {
 		return array(
 			'title'    => 'Page References Tab',
 			'summary'  => 'Adds a tab with a list of pages referencing the current page to the page edit view.',
-			'version'  => 20,
+			'version'  => 30,
 			'author'   => 'Niklas Lakanen',
 			'autoload' => true
 		);
@@ -108,22 +108,7 @@ class PageReferencesTab extends WireData implements Module, ConfigurableModule {
 		// iterate over fields
 		// handle each field separately to be able to tell which field matched (instead of f1|f2|f2=$page)
 		foreach(wire('fields') as $refField) {
-			// we're done if the field is of wrong type
-			if($refField->type != 'FieldtypePage') continue;
-			// we're done if the field is a system field
-			if($refField->flags & Field::flagSystem) continue;
-
-			// find references
-			$refs = wire('pages')->find("$refField=" . $this->editedPage->id);
-
-			foreach($refs as $refPage) {
-				$actions = array();
-				// show only appropriate actions
-				if($refPage->viewable()) array_push($actions, '<a href="' . $refPage->url . '">view</a>');
-				if($refPage->editable()) array_push($actions, '<a href="' . $this->config->urls->admin . 'page/edit/?id=' . $refPage->id . '">edit</a>');
-				$table->row(array($refPage->title, $refPage->path, $refField, implode(' | ', $actions)));
-				$table->rowCount++;
-			}
+			$this->addReferencesToTable($table, $refField);
 		}
 
 		if($table->rowCount) {
@@ -135,6 +120,44 @@ class PageReferencesTab extends WireData implements Module, ConfigurableModule {
 		// append the markup to the tab and the tab to the form
 		$refTab->append($field);
 		$form->append($refTab);
+	}
+
+	/**
+	 * Find and add references via given field to the resulting table. Handles repeaters by calling itself
+	 * (doesn't get too deep as repeaters can't be stacked).
+	 *
+	 * @param MarkupAdminDataTable $table Table object for found results
+	 * @param Field $refField Field object to use for findind references
+	 * @param string|Field $selectorField Optional string (or Field) to be used in selector as the field part. Defaults to $refField.
+	 *
+	 */
+	private function addReferencesToTable($table, $refField, $selectorField=null) {
+		// we're done if the field is a system field
+		if($refField->flags & Field::flagSystem) return;
+
+		// recursion to handle fields inside repeaters
+		if($refField->type == 'FieldtypeRepeater') {
+			foreach($refField->repeaterFields as $repeaterFieldId) {
+				$repeaterField = wire('fields')->get($repeaterFieldId);
+				$this->addReferencesToTable($table, $repeaterField, "$refField.$repeaterField");
+			}
+		}
+
+		// we're done if the field isn't a page reference either
+		if($refField->type != 'FieldtypePage') return;
+
+		// find references
+		if(!$selectorField) $selectorField = $refField;
+		$refs = wire('pages')->find("$selectorField=" . $this->editedPage->id);
+
+		foreach($refs as $refPage) {
+			$actions = array();
+			// show only appropriate actions
+			if($refPage->viewable()) array_push($actions, '<a href="' . $refPage->url . '">view</a>');
+			if($refPage->editable()) array_push($actions, '<a href="' . $this->config->urls->admin . 'page/edit/?id=' . $refPage->id . '">edit</a>');
+			$table->row(array($refPage->title, $refPage->path, $selectorField, implode(' | ', $actions)));
+			$table->rowCount++;
+		}
 	}
 
 	/**
